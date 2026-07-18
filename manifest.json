@@ -1,0 +1,16 @@
+{
+  "name": "urchin",
+  "display_name": "Urchin",
+  "version": "0.2.0",
+  "description": "Urchin blacklist integration",
+  "author": "Hexze",
+  "homepage": null,
+  "dependencies": [
+    {
+      "name": "denicker",
+      "version": "1.1.0",
+      "optional": false
+    }
+  ],
+  "min_starfish_version": null
+}
