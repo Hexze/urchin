@@ -1,13 +1,13 @@
 plugin = {
     name = "urchin",
-    displayName = "Urchin",
+    displayName = "Urchin Blacklist",
     prefix = "§5BL",
-    version = "0.2.0",
-    credits = "Hexze",
-    description = [[
-Urchin blacklist integration]],
+    version = "0.2.1",
+    credits = "",
+    description = "Urchin blacklist integration - /urchin check scans players; /urchin tag opens an in-chat panel",
     dependencies = {
-        { name = "denicker", minVersion = "1.1.0" }
+        { name = "denicker", minVersion = "1.1.0" },
+        { name = "anticheat", optional = true }
     }
 }
 
@@ -48,7 +48,6 @@ local OP_ERRORS = {
     ["moderator access required"] = "Only moderators can do this"
 }
 
--- Performance color tiers (highest threshold first)
 local function tier(value, thresholds)
     for _, entry in ipairs(thresholds) do
         if value >= entry[1] then return entry[2] end
@@ -166,7 +165,7 @@ local function sendComponents(extra)
     }))
 end
 
--- Relative time (API timestamps are epoch milliseconds)
+-- Relative time
 
 local TIME_UNITS = {
     { secs = 31536000, name = "year" },
@@ -199,7 +198,7 @@ local function expiry(timestampMs)
     return "Expires in " .. relativeTime(seconds, "", "under a minute")
 end
 
--- Coral API layer
+-- API layer
 
 local function apiRequest(method, path, body, callback)
     local options = {
@@ -282,11 +281,19 @@ end
 
 -- Player identity helpers
 
-local function getRealName(name)
-    if starfish.plugins.exists("denicker") then
-        return starfish.plugins.call("denicker", "getRealName", name)
+local function callPlugin(name, func, ...)
+    if starfish.plugins.exists(name) then
+        return starfish.plugins.call(name, func, ...)
     end
     return nil
+end
+
+local function getRealName(name)
+    return callPlugin("denicker", "getRealName", name)
+end
+
+local function resolveTarget(name)
+    return getRealName(name) or name
 end
 
 local function properName(name)
@@ -306,7 +313,7 @@ local function headerName(username, displayName)
     return "§7" .. teamFormatted(username)
 end
 
--- Tag rendering (shared between chat lines, tooltips, and panels)
+-- Tag rendering
 
 local function tagDetailLines(tag)
     local def = tagDef(tag.tag_type)
@@ -405,7 +412,7 @@ local function clearDisplayNames()
     end
 end
 
--- Automatic blacklist alerts (lobby "ONLINE:" lists)
+-- Automatic blacklist alerts
 
 local function renderPlayerLine(username, tags, realName)
     local nameDisplay = realName
@@ -454,8 +461,6 @@ local function emitAlerts(entries)
     end
 end
 
--- Present players are looked up in one batch by UUID; resolved nicks and
--- offline players fall back to per-name lookup.
 local function gatherAndAlert(usernames)
     local entries = {}
     local batchEntries = {}
@@ -527,7 +532,7 @@ local function onChat(event)
     end
 end
 
--- Bedwars stats block for the check panel
+-- Bedwars stats
 
 local function topMode(bw)
     local modes = {
@@ -646,6 +651,30 @@ local function appendAddButton(extra, username, tagName)
     })
 end
 
+local function appendAnticheatFlags(extra, username)
+    local names = { username }
+    local nicked = callPlugin("denicker", "getNickedPlayers")
+    if nicked then
+        for _, info in ipairs(nicked) do
+            if info.realName and info.realName:lower() == username:lower() then
+                table.insert(names, info.nickName)
+            end
+        end
+    end
+
+    local parts = {}
+    for _, name in ipairs(names) do
+        local flags = callPlugin("anticheat", "getFlags", name)
+        for _, flag in ipairs(flags or {}) do
+            table.insert(parts, "§c" .. flag.check .. " §8x" .. flag.count)
+        end
+    end
+    if #parts == 0 then return end
+
+    table.insert(extra, { text = "\n§7Anticheat: " .. table.concat(parts, "§8, ") })
+    table.insert(extra, { text = "\n" .. SEPARATOR })
+end
+
 local function sendPanel(username, uuid, tags, displayName, stats)
     local extra = {
         {
@@ -671,6 +700,7 @@ local function sendPanel(username, uuid, tags, displayName, stats)
         appendStats(extra, stats)
         table.insert(extra, { text = "\n" .. SEPARATOR })
     end
+    appendAnticheatFlags(extra, username)
     table.insert(extra, { text = "\n§7Add:" })
     for _, tagName in ipairs(ADDABLE) do
         appendAddButton(extra, username, tagName)
@@ -741,7 +771,7 @@ local function openRemovePanel(username)
     end)
 end
 
--- Confirmation prompts (green box; to decline, just ignore it)
+-- Confirmation prompts
 
 local function sendConfirm(username, header, confirmHover)
     local function confirmButton()
@@ -934,8 +964,6 @@ local function actionUntag(username, typeArg)
     end)
 end
 
--- Pending actions (and their reasons) live in memory, not the button, so the
--- confirm command stays well under the client's 100-character limit.
 local function actionConfirm(username)
     local key = username:lower()
     local action = pending[key]
@@ -1021,7 +1049,7 @@ starfish.commands.register("check", {
         return
     end
     for _, username in ipairs(args) do
-        openPanel(username, true)
+        openPanel(resolveTarget(username), true)
     end
 end)
 
@@ -1037,7 +1065,7 @@ starfish.commands.register("tag", {
         sendError("Usage: /urchin tag <player> [tagtype] [reason]")
         return
     end
-    actionTag(args[1], args[2], table.concat(args, " ", 3))
+    actionTag(resolveTarget(args[1]), args[2], table.concat(args, " ", 3))
 end)
 
 starfish.commands.register("untag", {
@@ -1051,7 +1079,7 @@ starfish.commands.register("untag", {
         sendError("Usage: /urchin untag <player> [tagtype]")
         return
     end
-    actionUntag(args[1], args[2])
+    actionUntag(resolveTarget(args[1]), args[2])
 end)
 
 starfish.commands.register("confirm", {
@@ -1064,7 +1092,7 @@ starfish.commands.register("confirm", {
     actionConfirm(args[1])
 end)
 
--- Exports (consumed by the bedwars tablist)
+-- Exports
 
 starfish.api.export("getPlayerTags", function(username)
     if not username then return nil end
