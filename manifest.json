@@ -1,8 +1,8 @@
 {
   "name": "urchin",
-  "display_name": "Urchin",
-  "version": "0.2.0",
-  "description": "Urchin blacklist integration",
+  "display_name": "Urchin Blacklist",
+  "version": "0.2.1",
+  "description": "Urchin blacklist integration - /urchin check scans players; /urchin tag opens an in-chat panel",
   "author": "Hexze",
   "homepage": null,
   "dependencies": [
@@ -10,6 +10,11 @@
       "name": "denicker",
       "version": "1.1.0",
       "optional": false
+    },
+    {
+      "name": "anticheat",
+      "version": null,
+      "optional": true
     }
   ],
   "min_starfish_version": null
