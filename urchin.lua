@@ -1,8 +1,8 @@
 plugin = {
     name = "urchin",
-    displayName = "Urchin Blacklist",
+    displayName = "Urchin",
     prefix = "§5BL",
-    version = "0.2.1",
+    version = "0.2.2",
     credits = "",
     description = "Urchin blacklist integration - /urchin check scans players; /urchin tag opens an in-chat panel",
     dependencies = {
