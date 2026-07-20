@@ -1,8 +1,8 @@
 {
   "name": "urchin",
-  "display_name": "Urchin Blacklist",
-  "version": "0.2.1",
-  "description": "Urchin blacklist integration - /urchin check scans players; /urchin tag opens an in-chat panel",
+  "display_name": "Urchin",
+  "version": "0.2.2",
+  "description": "Urchin blacklist integration",
   "author": "Hexze",
   "homepage": null,
   "dependencies": [
