@@ -1,7 +1,7 @@
 {
   "name": "urchin",
   "display_name": "Urchin",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "Urchin blacklist integration",
   "author": "Hexze",
   "homepage": null,
