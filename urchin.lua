@@ -2,9 +2,10 @@ plugin = {
     name = "urchin",
     displayName = "Urchin",
     prefix = "§5BL",
-    version = "0.2.2",
+    version = "0.3.0",
+    author = "Starfish",
     credits = "",
-    description = "Urchin blacklist integration - /urchin check scans players; /urchin tag opens an in-chat panel",
+    description = "Urchin blacklist integration",
     dependencies = {
         { name = "denicker", minVersion = "1.1.0" },
         { name = "anticheat", optional = true }
@@ -73,17 +74,10 @@ starfish.schema.section({
     key = "alerts",
     label = "Alerts",
     description = "Configure the plugin's chat alerts.",
-    defaults = {
-        alerts = {
-            enabled = true,
-            audioAlerts = { enabled = true },
-            alertDelay = 0
-        }
-    },
     settings = {
         { key = "alerts.enabled", type = "toggle", default = true, description = "Enable or disable all chat alerts." },
         { key = "alerts.audioAlerts.enabled", type = "soundToggle", default = true, description = "Play a sound when a tagged player is found." },
-        { key = "alerts.alertDelay", type = "cycle", description = "The delay in milliseconds before sending a tag alert.", displayLabel = "Delay", values = {
+        { key = "alerts.alertDelay", type = "cycle", default = 0, description = "The delay in milliseconds before sending a tag alert.", displayLabel = "Delay", values = {
             { text = "0ms", value = 0 },
             { text = "500ms", value = 500 },
             { text = "1000ms", value = 1000 }
@@ -95,7 +89,6 @@ starfish.schema.section({
     key = "modifyDisplayNames",
     label = "Label Tags in Tab",
     description = "Enable or disable tab suffixes for tagged players.",
-    defaults = { modifyDisplayNames = { enabled = true } },
     settings = {
         { key = "modifyDisplayNames.enabled", type = "toggle", default = true, description = "Adds a label to tagged players in tab to indicate their tags." },
     }
@@ -105,9 +98,8 @@ starfish.schema.section({
     key = "stats",
     label = "Stats",
     description = "Configure the Bedwars stats shown when you /urchin check a player.",
-    defaults = { stats = { period = "monthly" } },
     settings = {
-        { key = "stats.period", type = "cycle", description = "Show the Bedwars session for the calendar month or a rolling 30 days.", displayLabel = "Period", values = {
+        { key = "stats.period", type = "cycle", default = "monthly", description = "Show the Bedwars session for the calendar month or a rolling 30 days.", displayLabel = "Period", values = {
             { text = "Monthly", value = "monthly" },
             { text = "Last 30 days", value = "30d" }
         }},
@@ -121,16 +113,6 @@ local playerTags = {}
 local pending = {}
 
 -- Config and formatting helpers
-
-local function getConfig(key, default)
-    local val = starfish.config.get(key)
-    if val ~= nil then return val end
-    return default
-end
-
-local function stripColors(text)
-    return text:gsub("§.", "")
-end
 
 local function normalizeUuid(uuid)
     return uuid:gsub("-", ""):lower()
@@ -151,18 +133,28 @@ local function resolveType(input)
 end
 
 local function sendError(message)
-    starfish.chat.send(starfish.chat.error(message))
+    starfish.chat.error(message)
 end
 
 local function sendInfo(message)
-    starfish.chat.send(starfish.chat.warning(message))
+    starfish.chat.warning(message)
 end
 
-local function sendComponents(extra)
-    starfish.chat.sendRaw(starfish.http.jsonEncode({
-        text = starfish.chat.prefix(""),
-        extra = extra
-    }))
+local function sendComponents(parts)
+    starfish.chat.info(starfish.text.join(parts))
+end
+
+local function component(text, hoverText, clickAction, clickValue)
+    local c = starfish.text.of(text)
+    if hoverText then
+        c = c:hover(hoverText)
+    end
+    if clickAction == "suggest_command" then
+        c = c:suggest(clickValue)
+    elseif clickAction == "run_command" then
+        c = c:run(clickValue)
+    end
+    return c
 end
 
 -- Relative time
@@ -207,7 +199,7 @@ local function apiRequest(method, path, body, callback)
         headers = {}
     }
     if body then
-        options.body = starfish.http.jsonEncode(body)
+        options.body = json.encode(body)
         options.headers["Content-Type"] = "application/json"
     end
     starfish.http.request(options, callback)
@@ -232,7 +224,7 @@ local function batchLookup(uuids, callback)
         if result.status == 200 and result.data then
             callback(result.data.players or {})
         else
-            starfish.debug("Urchin: batch lookup failed: " .. apiFailureMessage(result))
+            starfish.log.debug("Urchin: batch lookup failed: " .. apiFailureMessage(result))
             callback(nil)
         end
     end)
@@ -281,15 +273,8 @@ end
 
 -- Player identity helpers
 
-local function callPlugin(name, func, ...)
-    if starfish.plugins.exists(name) then
-        return starfish.plugins.call(name, func, ...)
-    end
-    return nil
-end
-
 local function getRealName(name)
-    return callPlugin("denicker", "getRealName", name)
+    return starfish.plugins.optional("denicker").getRealName(name)
 end
 
 local function resolveTarget(name)
@@ -297,12 +282,13 @@ local function resolveTarget(name)
 end
 
 local function properName(name)
-    local player = starfish.players.find(name)
+    local player = starfish.players.byName(name)
     return player and player.name or name
 end
 
 local function teamFormatted(name)
-    local team = starfish.players.getTeam(name)
+    local player = starfish.players.byName(name)
+    local team = player and player.team
     local prefix = team and team.prefix or ""
     local suffix = team and team.suffix or ""
     return prefix .. name .. suffix
@@ -334,7 +320,7 @@ end
 local function detailComponents(tag)
     local components = {}
     for _, line in ipairs(tagDetailLines(tag)) do
-        table.insert(components, { text = "\n" .. line })
+        table.insert(components, component("\n" .. line))
     end
     return components
 end
@@ -354,22 +340,13 @@ end
 
 local function tagBadge(tag, index, hover, pasteName)
     local def = tagDef(tag.tag_type)
-    return {
-        text = (index == 1 and " " or "") .. "§8[§" .. def.color .. def.icon .. "§8]§r",
-        hoverEvent = { action = "show_text", value = hover },
-        clickEvent = {
-            action = "suggest_command",
-            value = "⚠ " .. pasteName .. " [" .. def.display .. "] | \"" .. (tag.reason or "") .. "\" - Added " .. (tag.added_on and timeAgo(tag.added_on) or "unknown")
-        }
-    }
+    local pasteText = "⚠ " .. pasteName .. " [" .. def.display .. "] | \"" .. (tag.reason or "") .. "\" - Added "
+        .. (tag.added_on and timeAgo(tag.added_on) or "unknown")
+    return component((index == 1 and " " or "") .. "§8[§" .. def.color .. def.icon .. "§8]§r", hover, "suggest_command", pasteText)
 end
 
 local function manageButton(username)
-    return {
-        text = " §8[§a+§8]§r",
-        hoverEvent = { action = "show_text", value = "§8Manage tags for §f" .. username },
-        clickEvent = { action = "run_command", value = "/urchin tag " .. username }
-    }
+    return component(" §8[§a+§8]§r", "§8Manage tags for §f" .. username, "run_command", "/urchin tag " .. username)
 end
 
 local function priorityOf(tagType)
@@ -395,7 +372,7 @@ end
 
 local function applyTagSuffix(uuid, tag)
     taggedDisplayNames[uuid] = tag
-    if getConfig("modifyDisplayNames.enabled", true) then
+    if starfish.config.get("modifyDisplayNames.enabled", true) then
         starfish.display.setSuffix(uuid, suffixFor(tag))
     end
 end
@@ -422,11 +399,7 @@ local function renderPlayerLine(username, tags, realName)
     local hover = buildHover(tags)
 
     local extra = {
-        {
-            text = nameDisplay,
-            clickEvent = { action = "suggest_command", value = target },
-            hoverEvent = { action = "show_text", value = "§8Click to copy name" }
-        }
+        component(nameDisplay, "§8Click to copy name", "suggest_command", target),
     }
 
     if #tags > 0 then
@@ -434,7 +407,7 @@ local function renderPlayerLine(username, tags, realName)
             table.insert(extra, tagBadge(tag, i, hover, target))
         end
     else
-        table.insert(extra, { text = " §8(§7clean§8)" })
+        table.insert(extra, component(" §8(§7clean§8)"))
     end
     table.insert(extra, manageButton(target))
 
@@ -450,14 +423,14 @@ local function emitAlerts(entries)
             playerTags[(entry.realName or entry.name):lower()] = entry.tags
             playerTags[entry.name:lower()] = entry.tags
 
-            local player = entry.player or starfish.players.find(entry.name)
+            local player = entry.player or starfish.players.byName(entry.name)
             if player then
                 applyTagSuffix(player.uuid, highestPriority(entry.tags))
             end
         end
     end
-    if anyTags and getConfig("alerts.audioAlerts.enabled", true) then
-        starfish.chat.sound("note.pling", 1.0, 1.0)
+    if anyTags and starfish.config.get("alerts.audioAlerts.enabled", true) then
+        starfish.client.world.playSound("note.pling", { volume = 1.0, pitch = 1.0 })
     end
 end
 
@@ -470,9 +443,9 @@ local function gatherAndAlert(usernames)
 
     local function finishIfReady()
         if not batchDone or pendingLookups > 0 then return end
-        local delay = getConfig("alerts.alertDelay", 0)
+        local delay = starfish.config.get("alerts.alertDelay", 0)
         if delay > 0 then
-            starfish.events.delay(delay, function() emitAlerts(entries) end)
+            starfish.timers.delay(delay, function() emitAlerts(entries) end)
         else
             emitAlerts(entries)
         end
@@ -483,7 +456,7 @@ local function gatherAndAlert(usernames)
         table.insert(entries, entry)
 
         if not entry.realName then
-            entry.player = starfish.players.find(name)
+            entry.player = starfish.players.byName(name)
         end
 
         if entry.player and entry.player.uuid then
@@ -511,10 +484,10 @@ local function gatherAndAlert(usernames)
 end
 
 local function onChat(event)
-    if not getConfig("alerts.enabled", true) then return end
-    if event.position == 2 then return end
+    if not starfish.config.get("alerts.enabled", true) then return end
+    if event.kind == "actionBar" then return end
 
-    local text = stripColors(event.message or "")
+    local text = starfish.text.plain(event.message or "")
     if not text:match("^ONLINE:") then return end
 
     local usernames = {}
@@ -613,17 +586,14 @@ local function appendStats(extra, stats)
 
     if bedwars then
         for _, line in ipairs(bedwars) do
-            table.insert(extra, { text = "\n" .. line })
+            table.insert(extra, component("\n" .. line))
         end
     end
     if streaks then
-        table.insert(extra, {
-            text = "\n" .. streaks.text,
-            hoverEvent = { action = "show_text", value = streaks.hover }
-        })
+        table.insert(extra, component("\n" .. streaks.text, streaks.hover))
     end
     if not bedwars and not streaks then
-        table.insert(extra, { text = "\n§8No tracked stats yet" })
+        table.insert(extra, component("\n§8No tracked stats yet"))
     end
 end
 
@@ -631,29 +601,31 @@ end
 
 local function appendTagDetail(extra, username, tag)
     local lines = tagDetailLines(tag)
-    table.insert(extra, { text = "\n" .. lines[1] .. " " })
-    table.insert(extra, {
-        text = "§8[§cX§8]§r",
-        hoverEvent = { action = "show_text", value = "§cClick to remove this tag" },
-        clickEvent = { action = "run_command", value = "/urchin untag " .. username .. " " .. tag.tag_type }
-    })
+    table.insert(extra, component("\n" .. lines[1] .. " "))
+    table.insert(extra, component(
+        "§8[§cX§8]§r",
+        "§cClick to remove this tag",
+        "run_command",
+        "/urchin untag " .. username .. " " .. tag.tag_type
+    ))
     for i = 2, #lines do
-        table.insert(extra, { text = "\n" .. lines[i] })
+        table.insert(extra, component("\n" .. lines[i]))
     end
 end
 
 local function appendAddButton(extra, username, tagName)
     local def = TAGS[tagName]
-    table.insert(extra, {
-        text = " §8[§" .. def.color .. def.icon .. "§8]§r",
-        hoverEvent = { action = "show_text", value = "§7Add §" .. def.color .. def.display .. "§7 to §f" .. username .. "\n§8Click, then type a reason and press enter" },
-        clickEvent = { action = "suggest_command", value = "/urchin tag " .. username .. " " .. def.short .. " " }
-    })
+    table.insert(extra, component(
+        " §8[§" .. def.color .. def.icon .. "§8]§r",
+        "§7Add §" .. def.color .. def.display .. "§7 to §f" .. username .. "\n§8Click, then type a reason and press enter",
+        "suggest_command",
+        "/urchin tag " .. username .. " " .. def.short .. " "
+    ))
 end
 
 local function appendAnticheatFlags(extra, username)
     local names = { username }
-    local nicked = callPlugin("denicker", "getNickedPlayers")
+    local nicked = starfish.plugins.optional("denicker").getNickedPlayers()
     if nicked then
         for _, info in ipairs(nicked) do
             if info.realName and info.realName:lower() == username:lower() then
@@ -664,44 +636,40 @@ local function appendAnticheatFlags(extra, username)
 
     local parts = {}
     for _, name in ipairs(names) do
-        local flags = callPlugin("anticheat", "getFlags", name)
+        local flags = starfish.plugins.optional("anticheat").getFlags(name)
         for _, flag in ipairs(flags or {}) do
             table.insert(parts, "§c" .. flag.check .. " §8x" .. flag.count)
         end
     end
     if #parts == 0 then return end
 
-    table.insert(extra, { text = "\n§7Anticheat: " .. table.concat(parts, "§8, ") })
-    table.insert(extra, { text = "\n" .. SEPARATOR })
+    table.insert(extra, component("\n§7Anticheat: " .. table.concat(parts, "§8, ")))
+    table.insert(extra, component("\n" .. SEPARATOR))
 end
 
 local function sendPanel(username, uuid, tags, displayName, stats)
     local extra = {
-        {
-            text = headerName(username, displayName),
-            hoverEvent = { action = "show_text", value = "§8" .. dashUuid(uuid) .. "\n§8Click to copy name" },
-            clickEvent = { action = "suggest_command", value = username }
-        },
-        { text = " §8(§7" .. #tags .. " tag" .. (#tags == 1 and "" or "s") .. "§8)" },
-        { text = "\n" .. SEPARATOR }
+        component(headerName(username, displayName), "§8" .. dashUuid(uuid) .. "\n§8Click to copy name", "suggest_command", username),
+        component(" §8(§7" .. #tags .. " tag" .. (#tags == 1 and "" or "s") .. "§8)"),
+        component("\n" .. SEPARATOR),
     }
 
     if #tags == 0 then
-        table.insert(extra, { text = "\n§8None" })
+        table.insert(extra, component("\n§8None"))
     else
         for i, tag in ipairs(tags) do
-            if i > 1 then table.insert(extra, { text = "\n" }) end
+            if i > 1 then table.insert(extra, component("\n")) end
             appendTagDetail(extra, username, tag)
         end
     end
 
-    table.insert(extra, { text = "\n" .. SEPARATOR })
+    table.insert(extra, component("\n" .. SEPARATOR))
     if stats then
         appendStats(extra, stats)
-        table.insert(extra, { text = "\n" .. SEPARATOR })
+        table.insert(extra, component("\n" .. SEPARATOR))
     end
     appendAnticheatFlags(extra, username)
-    table.insert(extra, { text = "\n§7Add:" })
+    table.insert(extra, component("\n§7Add:"))
     for _, tagName in ipairs(ADDABLE) do
         appendAddButton(extra, username, tagName)
     end
@@ -710,7 +678,7 @@ local function sendPanel(username, uuid, tags, displayName, stats)
 end
 
 local function fetchStats(uuid, callback)
-    local period = getConfig("stats.period", "monthly")
+    local period = starfish.config.get("stats.period", "monthly")
     local session, winstreaks
     local remaining = 2
 
@@ -763,7 +731,7 @@ local function openRemovePanel(username)
         end
 
         local clean = properName(username)
-        local extra = { { text = "§7Remove from " .. headerName(clean, lookup.displayname) .. "§7:" } }
+        local extra = { component("§7Remove from " .. headerName(clean, lookup.displayname) .. "§7:") }
         for _, tag in ipairs(lookup.tags) do
             appendTagDetail(extra, clean, tag)
         end
@@ -775,21 +743,17 @@ end
 
 local function sendConfirm(username, header, confirmHover)
     local function confirmButton()
-        return {
-            text = "§8[§a██§8]§r",
-            hoverEvent = { action = "show_text", value = confirmHover },
-            clickEvent = { action = "run_command", value = "/urchin confirm " .. username }
-        }
+        return component("§8[§a██§8]§r", confirmHover, "run_command", "/urchin confirm " .. username)
     end
 
     local extra = {}
-    for _, component in ipairs(header) do
-        table.insert(extra, component)
+    for _, part in ipairs(header) do
+        table.insert(extra, part)
     end
-    table.insert(extra, { text = "\n§7Proceed?" })
-    table.insert(extra, { text = "\n" })
+    table.insert(extra, component("\n§7Proceed?"))
+    table.insert(extra, component("\n"))
     table.insert(extra, confirmButton())
-    table.insert(extra, { text = "\n" })
+    table.insert(extra, component("\n"))
     table.insert(extra, confirmButton())
 
     sendComponents(extra)
@@ -798,69 +762,69 @@ end
 local function sendAddPrompt(username, display, tagType, reason)
     local def = TAGS[tagType]
     local header = {
-        { text = "§aAdd Tag" },
-        { text = "\n§7IGN - " .. display },
-        { text = "\n" .. SEPARATOR }
+        component("§aAdd Tag"),
+        component("\n§7IGN - " .. display),
+        component("\n" .. SEPARATOR),
     }
-    for _, component in ipairs(detailComponents({ tag_type = tagType, reason = reason })) do
-        table.insert(header, component)
+    for _, part in ipairs(detailComponents({ tag_type = tagType, reason = reason })) do
+        table.insert(header, part)
     end
-    table.insert(header, { text = "\n" .. SEPARATOR })
+    table.insert(header, component("\n" .. SEPARATOR))
     sendConfirm(username, header, "§aAdd the §" .. def.color .. def.display .. "§a tag")
 end
 
 local function sendOverwritePrompt(username, display, conflict, newType, reason)
     local newDef = TAGS[newType]
     local header = {
-        { text = "§6Tag Overwrite" },
-        { text = "\n§7This player already has an incompatible tag. Overwriting replaces it with your tag." },
-        { text = "\n" .. SEPARATOR },
-        { text = "\n§8Current" },
-        { text = "\n§7IGN - " .. display }
+        component("§6Tag Overwrite"),
+        component("\n§7This player already has an incompatible tag. Overwriting replaces it with your tag."),
+        component("\n" .. SEPARATOR),
+        component("\n§8Current"),
+        component("\n§7IGN - " .. display),
     }
-    for _, component in ipairs(detailComponents(conflict)) do
-        table.insert(header, component)
+    for _, part in ipairs(detailComponents(conflict)) do
+        table.insert(header, part)
     end
-    table.insert(header, { text = "\n" .. SEPARATOR })
-    table.insert(header, { text = "\n§8New" })
-    for _, component in ipairs(detailComponents({ tag_type = newType, reason = reason })) do
-        table.insert(header, component)
+    table.insert(header, component("\n" .. SEPARATOR))
+    table.insert(header, component("\n§8New"))
+    for _, part in ipairs(detailComponents({ tag_type = newType, reason = reason })) do
+        table.insert(header, part)
     end
-    table.insert(header, { text = "\n" .. SEPARATOR })
+    table.insert(header, component("\n" .. SEPARATOR))
     sendConfirm(username, header, "§aOverwrite with §" .. newDef.color .. newDef.display)
 end
 
 local function sendRemovePrompt(username, display, tag)
     local def = tagDef(tag.tag_type)
     local header = {
-        { text = "§cRemove Tag" },
-        { text = "\n§7IGN - " .. display },
-        { text = "\n" .. SEPARATOR }
+        component("§cRemove Tag"),
+        component("\n§7IGN - " .. display),
+        component("\n" .. SEPARATOR),
     }
-    for _, component in ipairs(detailComponents(tag)) do
-        table.insert(header, component)
+    for _, part in ipairs(detailComponents(tag)) do
+        table.insert(header, part)
     end
-    table.insert(header, { text = "\n" .. SEPARATOR })
+    table.insert(header, component("\n" .. SEPARATOR))
     sendConfirm(username, header, "§aRemove the §" .. def.color .. def.display .. "§a tag")
 end
 
 local function sendResult(message, tagType)
-    local extra = { { text = message } }
+    local extra = { component(message) }
     if tagType then
         local def = tagDef(tagType)
-        table.insert(extra, { text = " §8[§" .. def.color .. def.icon .. "§8] §f" .. def.display .. "§a." })
+        table.insert(extra, component(" §8[§" .. def.color .. def.icon .. "§8] §f" .. def.display .. "§a."))
     end
     sendComponents(extra)
 end
 
 local function sendAddableHelp()
-    local extra = { { text = "§7Tag types: " } }
+    local extra = { component("§7Tag types: ") }
     for i, name in ipairs(ADDABLE) do
         local def = TAGS[name]
-        table.insert(extra, {
-            text = (i > 1 and "§7, " or "") .. "§" .. def.color .. def.short .. "§8 (§7" .. def.display .. "§8)",
-            hoverEvent = { action = "show_text", value = "§" .. def.color .. def.display .. "\n§8/urchin tag <player> " .. def.short .. " <reason>" }
-        })
+        table.insert(extra, component(
+            (i > 1 and "§7, " or "") .. "§" .. def.color .. def.short .. "§8 (§7" .. def.display .. "§8)",
+            "§" .. def.color .. def.display .. "\n§8/urchin tag <player> " .. def.short .. " <reason>"
+        ))
     end
     sendComponents(extra)
 end
@@ -1011,28 +975,16 @@ local function resetSession()
     pending = {}
 end
 
-starfish.events.on("chat", onChat)
-starfish.events.on("respawn", resetSession)
+starfish.events.on("chat:receive", onChat)
+starfish.events.on("world:respawn", resetSession)
 
-starfish.events.on("plugin_restored", function(event)
-    if event.pluginName == "urchin" then
-        taggedDisplayNames = {}
-        playerTags = {}
-        pending = {}
-    end
-end)
-
-starfish.events.on("config_changed", function(event)
-    if event.plugin ~= "urchin" then return end
+starfish.events.on("config:changed", function(event)
     if event.key == "modifyDisplayNames.enabled" then
         if event.value == false then
             clearDisplayNames()
         else
             restoreDisplayNames()
         end
-    end
-    if event.key == "enabled" and event.value == false then
-        resetSession()
     end
 end)
 
@@ -1041,14 +993,10 @@ end)
 starfish.commands.register("check", {
     description = "Check and manage blacklist tags for one or more players",
     arguments = {
-        starfish.commands.greedy("usernames", "Space-separated usernames")
+        { name = "usernames", type = "greedy", description = "Space-separated usernames" }
     }
-}, function(args)
-    if #args == 0 then
-        sendInfo("Usage: /urchin check <username> [username...]")
-        return
-    end
-    for _, username in ipairs(args) do
+}, function(ctx)
+    for username in ctx.args.usernames:gmatch("%S+") do
         openPanel(resolveTarget(username), true)
     end
 end)
@@ -1056,53 +1004,48 @@ end)
 starfish.commands.register("tag", {
     description = "Tag a player (omit the type to open the panel)",
     arguments = {
-        starfish.commands.arg("player", "Player to tag"),
-        starfish.commands.optional("tagtype", "Tag type (e.g. bc, cc, s, c) - omit to choose"),
-        starfish.commands.greedy("reason", "Reason for the tag")
+        { name = "player", type = "string", description = "Player to tag" },
+        { name = "tagtype", type = "string", optional = true, description = "Tag type (e.g. bc, cc, s, c) - omit to choose" },
+        { name = "reason", type = "greedy", optional = true, description = "Reason for the tag" }
     }
-}, function(args)
-    if #args == 0 then
-        sendError("Usage: /urchin tag <player> [tagtype] [reason]")
-        return
-    end
-    actionTag(resolveTarget(args[1]), args[2], table.concat(args, " ", 3))
+}, function(ctx)
+    actionTag(resolveTarget(ctx.args.player), ctx.args.tagtype, ctx.args.reason)
 end)
 
 starfish.commands.register("untag", {
     description = "Remove a tag from a player (omit the type to choose)",
     arguments = {
-        starfish.commands.arg("player", "Player to untag"),
-        starfish.commands.optional("tagtype", "Tag type to remove - omit to choose")
+        { name = "player", type = "string", description = "Player to untag" },
+        { name = "tagtype", type = "string", optional = true, description = "Tag type to remove - omit to choose" }
     }
-}, function(args)
-    if #args == 0 then
-        sendError("Usage: /urchin untag <player> [tagtype]")
-        return
-    end
-    actionUntag(resolveTarget(args[1]), args[2])
+}, function(ctx)
+    actionUntag(resolveTarget(ctx.args.player), ctx.args.tagtype)
 end)
 
 starfish.commands.register("confirm", {
     description = "Confirm a pending tag action",
     arguments = {
-        starfish.commands.arg("player", "Player whose action to confirm")
+        { name = "player", type = "string", description = "Player whose action to confirm" }
     }
-}, function(args)
-    if #args == 0 then return end
-    actionConfirm(args[1])
+}, function(ctx)
+    actionConfirm(ctx.args.player)
 end)
 
 -- Exports
 
-starfish.api.export("getPlayerTags", function(username)
+starfish.plugin.export("getPlayerTags", function(username)
     if not username then return nil end
     return playerTags[username:lower()]
 end)
 
-starfish.api.export("getTagIcon", function(tagType)
+starfish.plugin.export("getTagIcon", function(tagType)
     return tagDef(tagType).icon
 end)
 
-starfish.api.export("getTagColor", function(tagType)
+starfish.plugin.export("getTagColor", function(tagType)
     return tagDef(tagType).color
 end)
+
+function plugin.onDisable()
+    resetSession()
+end
