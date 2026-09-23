@@ -269,16 +269,18 @@ local function fetchWinstreaks(player, callback)
     end)
 end
 
-local function fetchHypixelPlayer(player, callback)
+local function fetchHypixelPlayer(player)
     local path = "/v3/hypixel/player?player=" .. starfish.http.encodeUri(player) .. "&max_cache_age=" .. HYPIXEL_STATS_MAX_CACHE_AGE
     apiRequest("GET", path, nil, function(result)
+        local data, err = nil, nil
         if result.status ~= 200 or not result.data then
-            callback(nil, apiFailureMessage(result))
+            err = apiFailureMessage(result)
         elseif result.data.player == nil then
-            callback(nil, "nicked")
+            err = "nicked"
         else
-            callback(result.data.player)
+            data = result.data.player
         end
+        starfish.events.emit("urchin:playerFetched", { player = player, data = data, error = err })
     end)
 end
 
