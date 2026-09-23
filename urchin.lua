@@ -2,9 +2,7 @@ plugin = {
     name = "urchin",
     displayName = "Urchin",
     prefix = "§5BL",
-    version = "0.3.0",
-    author = "Starfish",
-    credits = "",
+    version = "0.4.0",
     description = "Urchin blacklist integration",
     dependencies = {
         { name = "denicker", minVersion = "1.1.0" },
@@ -16,6 +14,7 @@ plugin = {
 
 local API_HOST = "https://api.urchin.gg"
 local SEPARATOR = "§7§m-------------------------------------§r"
+local HYPIXEL_STATS_MAX_CACHE_AGE = "90s"
 
 local TAGS = {
     sniper            = { display = "Sniper",            short = "s",   icon = "S",   color = "c", priority = 1, addable = true },
@@ -103,6 +102,15 @@ starfish.schema.section({
             { text = "Monthly", value = "monthly" },
             { text = "Last 30 days", value = "30d" }
         }},
+    }
+})
+
+starfish.schema.section({
+    key = "urchinApi",
+    label = "Urchin API Key",
+    description = "Optional personal API key used to authenticate requests to the Urchin API.",
+    settings = {
+        { key = "urchinApi.key", type = "text", default = "", description = "Get a key with /dashboard in the Urchin Discord." },
     }
 })
 
@@ -198,6 +206,10 @@ local function apiRequest(method, path, body, callback)
         method = method,
         headers = {}
     }
+    local apiKey = starfish.config.get("urchinApi.key", "")
+    if apiKey ~= "" then
+        options.headers["X-API-Key"] = apiKey
+    end
     if body then
         options.body = json.encode(body)
         options.headers["Content-Type"] = "application/json"
@@ -254,6 +266,19 @@ end
 local function fetchWinstreaks(player, callback)
     apiRequest("GET", "/v3/player/winstreaks?player=" .. starfish.http.encodeUri(player), nil, function(result)
         callback(result.status == 200 and result.data or nil)
+    end)
+end
+
+local function fetchHypixelPlayer(player, callback)
+    local path = "/v3/hypixel/player?player=" .. starfish.http.encodeUri(player) .. "&max_cache_age=" .. HYPIXEL_STATS_MAX_CACHE_AGE
+    apiRequest("GET", path, nil, function(result)
+        if result.status ~= 200 or not result.data then
+            callback(nil, apiFailureMessage(result))
+        elseif result.data.player == nil then
+            callback(nil, "nicked")
+        else
+            callback(result.data.player)
+        end
     end)
 end
 
@@ -1045,6 +1070,8 @@ end)
 starfish.plugin.export("getTagColor", function(tagType)
     return tagDef(tagType).color
 end)
+
+starfish.plugin.export("fetchPlayer", fetchHypixelPlayer)
 
 function plugin.onDisable()
     resetSession()
