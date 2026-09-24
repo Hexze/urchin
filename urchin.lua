@@ -14,7 +14,12 @@ plugin = {
 
 local API_HOST = "https://api.urchin.gg"
 local SEPARATOR = "§7§m-------------------------------------§r"
-local HYPIXEL_STATS_MAX_CACHE_AGE = "90s"
+local XP_PER_PRESTIGE = 487000
+local XP_PER_LEVEL = 5000
+local HYPIXEL_STATS_CACHE_SECONDS = 90
+local HYPIXEL_STATS_MAX_CACHE_AGE = HYPIXEL_STATS_CACHE_SECONDS .. "s"
+local HYPIXEL_STATS_CACHE_MS = HYPIXEL_STATS_CACHE_SECONDS * 1000
+local NEXT_TICK_MS = 1
 
 local TAGS = {
     sniper            = { display = "Sniper",            short = "s",   icon = "S",   color = "c", priority = 1, addable = true },
@@ -55,17 +60,36 @@ local function tier(value, thresholds)
     return "7"
 end
 
-local BW_COLORS = {
-    wlr        = function(v) return tier(v, {{150, "5"}, {75, "d"}, {45, "4"}, {30, "c"}, {15, "6"}, {10.5, "e"}, {7.5, "2"}, {4.5, "a"}, {1.5, "f"}}) end,
-    fkdr       = function(v) return tier(v, {{500, "5"}, {250, "d"}, {150, "4"}, {100, "c"}, {50, "6"}, {35, "e"}, {25, "2"}, {15, "a"}, {5, "f"}}) end,
-    kdr        = function(v) return tier(v, {{8, "5"}, {7, "d"}, {6, "4"}, {5, "c"}, {4, "6"}, {3, "e"}, {2, "2"}, {1, "a"}, {0.5, "f"}}) end,
-    bblr       = function(v) return tier(v, {{100, "5"}, {50, "d"}, {30, "4"}, {20, "c"}, {10, "6"}, {7, "e"}, {5, "2"}, {3, "a"}, {1, "f"}}) end,
-    wins       = function(v) return tier(v, {{30000, "5"}, {15000, "d"}, {7500, "4"}, {4500, "c"}, {2250, "6"}, {1500, "e"}, {450, "2"}, {300, "a"}, {150, "f"}}) end,
-    finalKills = function(v) return tier(v, {{100000, "5"}, {50000, "d"}, {25000, "4"}, {15000, "c"}, {7500, "6"}, {5000, "e"}, {2500, "2"}, {1000, "a"}, {500, "f"}}) end,
-    kills      = function(v) return tier(v, {{75000, "5"}, {37500, "d"}, {18750, "4"}, {11250, "c"}, {5625, "6"}, {3750, "e"}, {1875, "2"}, {750, "a"}, {375, "f"}}) end,
-    bedsBroken = function(v) return tier(v, {{50000, "5"}, {25000, "d"}, {12500, "4"}, {7500, "c"}, {3750, "6"}, {2500, "e"}, {1250, "2"}, {500, "a"}, {250, "f"}}) end,
-    winstreak  = function(v) return tier(v, {{500, "5"}, {250, "d"}, {100, "4"}, {75, "c"}, {50, "6"}, {40, "e"}, {25, "2"}, {15, "a"}, {5, "f"}}) end
+local OVERVIEW_COLORS = {
+    fkdr   = function(v) return tier(v, {{100, "5"}, {50, "d"}, {30, "4"}, {20, "c"}, {10, "6"}, {7, "e"}, {5, "2"}, {3, "a"}, {1, "f"}}) end,
+    finals = function(v) return tier(v, {{100000, "5"}, {50000, "d"}, {25000, "4"}, {15000, "c"}, {7500, "6"}, {5000, "e"}, {2500, "2"}, {1000, "a"}, {500, "f"}}) end,
+    beds   = function(v) return tier(v, {{50000, "5"}, {25000, "d"}, {12500, "4"}, {7500, "c"}, {3750, "6"}, {2500, "e"}, {1250, "2"}, {500, "a"}, {250, "f"}}) end,
 }
+
+local PRESTIGE_SCHEMES = {
+    [0] = "7", "f", "6", "b", "2", "3", "4", "d", "9", "5",
+    "c6eabd5", "7ffff77", "7eeee67", "7bbbb37", "7aaaa27",
+    "7333397", "7cccc47", "7dddd57", "7999917", "7555587",
+    "87ff778", "ffee666", "66ffb33", "55dd6ee", "bbff778",
+    "ffaa222", "44ccdd5", "eeff888", "aa2266e", "bb33991",
+    "ee66cc4", "993366e", "c4774cc", "999dcc4", "2add552",
+    "cc442aa", "aaab991", "44ccb33", "11955d1", "ccaa399",
+    "55cc66e", "ee6cdd5", "193bf77", "0588550", "22ae65d",
+    "ffbb333", "3be66d5", "f4cc919", "55c66b3", "2afffa2",
+    "4459910", "4cc6ef4", "193bfe1", "5defed5", "3a282a3",
+    "2aefbd5", "4cefec4", "4623958", "5c6fb39", "7087ff7",
+    "cffffcf", "6efffb3", "efe66fe", "aeeeea2", "bbcccaa",
+    "33aafa3", "9ddddb9", "5ddddf5", "066eeff", "aaaa228",
+    "3bbbbf3", "4c6ec6e", "2af2af8", "233bba2", "88888d8",
+    "6622fff", "fff77c8", "dcccc6d", "87fffe8", "6f262f6",
+    "2aaac42", "87fb391", "fffffaf", "8844cc8", "fdddaaf",
+    "36666e3", "dffffed", "8666668", "444ccff", "9bbb339",
+    "ddddd58", "0c66cc4", "2dddda2", "f8888ff", "e648888",
+    "008877f", "eee00e0", "dddeebe", "0888880", "87fffef",
+    "9bfffc4",
+}
+
+local STAR_SYMBOLS = { [0] = "✫", "✪", "⚝", "✥", "✭" }
 
 -- Config schema
 
@@ -81,6 +105,7 @@ starfish.schema.section({
             { text = "500ms", value = 500 },
             { text = "1000ms", value = 1000 }
         }},
+        { key = "alerts.compact", type = "toggle", default = false, displayLabel = "Compact", description = "Show alerts as a single line of tag badges instead of the full tag details." },
     }
 })
 
@@ -90,18 +115,6 @@ starfish.schema.section({
     description = "Enable or disable tab suffixes for tagged players.",
     settings = {
         { key = "modifyDisplayNames.enabled", type = "toggle", default = true, description = "Adds a label to tagged players in tab to indicate their tags." },
-    }
-})
-
-starfish.schema.section({
-    key = "stats",
-    label = "Stats",
-    description = "Configure the Bedwars stats shown when you /urchin check a player.",
-    settings = {
-        { key = "stats.period", type = "cycle", default = "monthly", description = "Show the Bedwars session for the calendar month or a rolling 30 days.", displayLabel = "Period", values = {
-            { text = "Monthly", value = "monthly" },
-            { text = "Last 30 days", value = "30d" }
-        }},
     }
 })
 
@@ -119,6 +132,8 @@ starfish.schema.section({
 local taggedDisplayNames = {}
 local playerTags = {}
 local pending = {}
+local playerStatsCache = {}
+local playerStatsWaiters = {}
 
 -- Config and formatting helpers
 
@@ -129,6 +144,61 @@ end
 local function dashUuid(uuid)
     if #uuid ~= 32 then return uuid end
     return uuid:sub(1, 8) .. "-" .. uuid:sub(9, 12) .. "-" .. uuid:sub(13, 16) .. "-" .. uuid:sub(17, 20) .. "-" .. uuid:sub(21, 32)
+end
+
+local function formatNumber(n)
+    local grouped = tostring(math.floor(n)):reverse():gsub("(%d%d%d)", "%1,"):reverse()
+    return (grouped:gsub("^,", ""))
+end
+
+local function colorizeStars(stars)
+    local scheme = PRESTIGE_SCHEMES[math.min(math.floor(stars / 100), 100)]
+    local symbol = STAR_SYMBOLS[math.min(math.floor(stars / 1000), 4)]
+    local function color(slot)
+        local index = math.min(slot, #scheme)
+        return "§" .. scheme:sub(index, index)
+    end
+
+    local digitsText = tostring(math.floor(stars))
+    local parts = { color(1), "[" }
+    for i = 1, #digitsText do
+        table.insert(parts, color(2 + math.min(i - 1, 3)))
+        table.insert(parts, digitsText:sub(i, i))
+    end
+    table.insert(parts, color(6))
+    table.insert(parts, symbol)
+    table.insert(parts, color(7))
+    table.insert(parts, "]")
+    return table.concat(parts)
+end
+
+local function levelFromXp(xp)
+    local level = 100 * math.floor(xp / XP_PER_PRESTIGE)
+    local rem = xp % XP_PER_PRESTIGE
+    if rem < 500 then return level end
+    if rem < 1500 then return level + 1 end
+    if rem < 3500 then return level + 2 end
+    if rem < 7000 then return level + 3 end
+    return level + 4 + math.floor((rem - 7000) / XP_PER_LEVEL)
+end
+
+local function levelProgress(xp)
+    local rem = xp % XP_PER_PRESTIGE
+    if rem < 500 then return rem / 500 end
+    if rem < 1500 then return (rem - 500) / 1000 end
+    if rem < 3500 then return (rem - 1500) / 2000 end
+    if rem < 7000 then return (rem - 3500) / 3500 end
+    return ((rem - 7000) % XP_PER_LEVEL) / XP_PER_LEVEL
+end
+
+local function bedwarsLevel(xp, achievementLevel)
+    local level = xp and levelFromXp(xp) or achievementLevel or 0
+    return {
+        level = level,
+        progress = xp and levelProgress(xp) or 0,
+        starText = colorizeStars(level),
+        nextStarText = colorizeStars(level + 1)
+    }
 end
 
 local function tagDef(tagType)
@@ -254,11 +324,8 @@ local function lookupPlayer(player, callback)
     end)
 end
 
-local function fetchSession(player, period, callback)
-    local path = period == "30d"
-        and ("/v3/player/sessions/custom?player=" .. starfish.http.encodeUri(player) .. "&duration=30d")
-        or ("/v3/player/sessions/monthly?player=" .. starfish.http.encodeUri(player))
-    apiRequest("GET", path, nil, function(result)
+local function fetchMonthlySession(player, callback)
+    apiRequest("GET", "/v3/player/sessions/monthly?player=" .. starfish.http.encodeUri(player), nil, function(result)
         callback(result.status == 200 and result.data or nil)
     end)
 end
@@ -269,7 +336,53 @@ local function fetchWinstreaks(player, callback)
     end)
 end
 
-local function fetchHypixelPlayer(player)
+local function fetchSessionStats(uuid, callback)
+    local session, winstreaks
+    local remaining = 2
+
+    local function finish()
+        remaining = remaining - 1
+        if remaining == 0 then
+            callback(session, winstreaks)
+        end
+    end
+
+    fetchMonthlySession(uuid, function(result) session = result; finish() end)
+    fetchWinstreaks(uuid, function(result) winstreaks = result; finish() end)
+end
+
+local function freshCachedPlayerStats(key)
+    local entry = playerStatsCache[key]
+    if entry and starfish.time.since(entry.fetchedAt) < HYPIXEL_STATS_CACHE_MS then
+        return entry
+    end
+end
+
+local function cachePlayerStats(key, data, err)
+    for cachedKey, entry in pairs(playerStatsCache) do
+        if starfish.time.since(entry.fetchedAt) >= HYPIXEL_STATS_CACHE_MS then
+            playerStatsCache[cachedKey] = nil
+        end
+    end
+    playerStatsCache[key] = { data = data, error = err, fetchedAt = starfish.time.monotonic() }
+end
+
+local function requestHypixelPlayer(player, callback)
+    local key = player:lower()
+
+    local cached = freshCachedPlayerStats(key)
+    if cached then
+        starfish.timers.delay(NEXT_TICK_MS, function() callback(cached.data, cached.error) end)
+        return
+    end
+
+    local waiters = playerStatsWaiters[key]
+    if waiters then
+        table.insert(waiters, callback)
+        return
+    end
+    playerStatsWaiters[key] = { callback }
+
     local path = "/v3/hypixel/player?player=" .. starfish.http.encodeUri(player) .. "&max_cache_age=" .. HYPIXEL_STATS_MAX_CACHE_AGE
     apiRequest("GET", path, nil, function(result)
         local data, err = nil, nil
@@ -280,6 +393,20 @@ local function fetchHypixelPlayer(player)
         else
             data = result.data.player
         end
+        if data or err == "nicked" then
+            cachePlayerStats(key, data, err)
+        end
+
+        local waiting = playerStatsWaiters[key] or {}
+        playerStatsWaiters[key] = nil
+        for _, waiter in ipairs(waiting) do
+            waiter(data, err)
+        end
+    end)
+end
+
+local function fetchHypixelPlayer(player)
+    requestHypixelPlayer(player, function(data, err)
         starfish.events.emit("urchin:playerFetched", { player = player, data = data, error = err })
     end)
 end
@@ -365,15 +492,41 @@ local function buildHover(tags)
     return table.concat(lines, "\n")
 end
 
-local function tagBadge(tag, index, hover, pasteName)
+local function specComponent(spec)
+    return component(spec.text, spec.hover, "suggest_command", spec.paste)
+end
+
+local function playerHeaderSpec(username, uuid, displayName, starText)
+    local uuidLine = uuid and ("§8" .. dashUuid(uuid) .. "\n") or ""
+    return {
+        text = (starText and (starText .. " ") or "") .. headerName(username, displayName),
+        hover = uuidLine .. "§8Click to copy name",
+        paste = username
+    }
+end
+
+local function tagBadgeSpec(tag, index, hover, pasteName)
     local def = tagDef(tag.tag_type)
     local pasteText = "⚠ " .. pasteName .. " [" .. def.display .. "] | \"" .. (tag.reason or "") .. "\" - Added "
         .. (tag.added_on and timeAgo(tag.added_on) or "unknown")
-    return component((index == 1 and " " or "") .. "§8[§" .. def.color .. def.icon .. "§8]§r", hover, "suggest_command", pasteText)
+    return {
+        text = (index == 1 and " " or "") .. "§8[§" .. def.color .. def.icon .. "§8]§r",
+        hover = hover,
+        paste = pasteText
+    }
 end
 
-local function manageButton(username)
-    return component(" §8[§a+§8]§r", "§8Manage tags for §f" .. username, "run_command", "/urchin tag " .. username)
+local function tagBadge(tag, index, hover, pasteName)
+    return specComponent(tagBadgeSpec(tag, index, hover, pasteName))
+end
+
+local function tagBadgeSpecs(tags, pasteName)
+    local hover = buildHover(tags)
+    local specs = {}
+    for i, tag in ipairs(tags) do
+        specs[i] = tagBadgeSpec(tag, i, hover, pasteName)
+    end
+    return specs
 end
 
 local function priorityOf(tagType)
@@ -418,6 +571,15 @@ end
 
 -- Automatic blacklist alerts
 
+local function appendAlertDetails(extra, tags)
+    for i, tag in ipairs(tags) do
+        if i > 1 then table.insert(extra, component("\n")) end
+        for _, part in ipairs(detailComponents(tag)) do
+            table.insert(extra, part)
+        end
+    end
+end
+
 local function renderPlayerLine(username, tags, realName)
     local nameDisplay = realName
         and (teamFormatted(username):gsub(username, username .. " §c(" .. realName .. ")§r", 1))
@@ -425,18 +587,16 @@ local function renderPlayerLine(username, tags, realName)
     local target = realName or username
     local hover = buildHover(tags)
 
-    local extra = {
-        component(nameDisplay, "§8Click to copy name", "suggest_command", target),
-    }
-
-    if #tags > 0 then
-        for i, tag in ipairs(tags) do
-            table.insert(extra, tagBadge(tag, i, hover, target))
-        end
-    else
-        table.insert(extra, component(" §8(§7clean§8)"))
+    local extra = { component(nameDisplay, "§8Click to copy name", "suggest_command", target) }
+    for i, tag in ipairs(tags) do
+        table.insert(extra, tagBadge(tag, i, hover, target))
     end
-    table.insert(extra, manageButton(target))
+
+    if not starfish.config.get("alerts.compact", false) then
+        table.insert(extra, component("\n" .. SEPARATOR))
+        appendAlertDetails(extra, tags)
+        table.insert(extra, component("\n" .. SEPARATOR))
+    end
 
     sendComponents(extra)
 end
@@ -532,96 +692,21 @@ local function onChat(event)
     end
 end
 
--- Bedwars stats
+-- Bedwars overview
 
-local function topMode(bw)
-    local modes = {
-        { "Solo", "eight_one" }, { "Doubles", "eight_two" },
-        { "Threes", "four_three" }, { "Fours", "four_four" }, { "4v4", "two_four" }
-    }
-    local best, top = nil, 0
-    for _, mode in ipairs(modes) do
-        local games = (bw[mode[2] .. "_wins_bedwars"] or 0) + (bw[mode[2] .. "_losses_bedwars"] or 0)
-        if games > top then
-            top = games
-            best = mode[1]
-        end
-    end
-    return best
-end
-
-local function ratioLine(label, pos, neg, ratioColor, countColor)
-    local ratio = neg > 0 and pos / neg or pos
-    return string.format("§7%s: §%s%.2f §8(§%s%d §8/ §7%d§8)", label, ratioColor(ratio), ratio, countColor(pos), pos, neg)
-end
-
-local function bedwarsSummary(session, period)
-    local bw = session and session.delta and session.delta.stats and session.delta.stats.Bedwars
-    if not bw then return nil end
-
-    local w, l = bw.wins_bedwars or 0, bw.losses_bedwars or 0
-    local fk, fd = bw.final_kills_bedwars or 0, bw.final_deaths_bedwars or 0
-    local k, d = bw.kills_bedwars or 0, bw.deaths_bedwars or 0
-    local beds, bedsLost = bw.beds_broken_bedwars or 0, bw.beds_lost_bedwars or 0
-    if w == 0 and l == 0 and fk == 0 then return nil end
-
-    local level = session.delta.achievements and session.delta.achievements.bedwars_level
-    local stars = 0
-    if type(level) == "number" then
-        stars = level
-    elseif type(level) == "table" and level.new and level.old then
-        stars = level.new - level.old
-    end
-
-    local mode = topMode(bw)
-    local header = "§7Bedwars Session §8(" .. (period == "30d" and "30d" or "Monthly") .. ")"
-    if mode then header = header .. " §8| §7Most Played: §f" .. mode end
-    if stars > 0 then header = header .. " §8| §b+" .. stars .. "✫" end
+local function bedwarsOverview(player)
+    local bw = player.stats and player.stats.Bedwars or {}
+    local finals = bw.final_kills_bedwars or 0
+    local fkdr = finals / math.max(1, bw.final_deaths_bedwars or 1)
+    local beds = bw.beds_broken_bedwars or 0
+    local level = bedwarsLevel(bw.Experience, player.achievements and player.achievements.bedwars_level)
 
     return {
-        header,
-        ratioLine("WLR", w, l, BW_COLORS.wlr, BW_COLORS.wins),
-        ratioLine("FKDR", fk, fd, BW_COLORS.fkdr, BW_COLORS.finalKills),
-        ratioLine("KDR", k, d, BW_COLORS.kdr, BW_COLORS.kills),
-        ratioLine("BBLR", beds, bedsLost, BW_COLORS.bblr, BW_COLORS.bedsBroken)
+        starText = level.starText,
+        line = "§7FKDR: §" .. OVERVIEW_COLORS.fkdr(fkdr) .. string.format("%.1f", fkdr)
+            .. " §8| §7Finals: §" .. OVERVIEW_COLORS.finals(finals) .. formatNumber(finals)
+            .. " §8| §7Beds: §" .. OVERVIEW_COLORS.beds(beds) .. formatNumber(beds)
     }
-end
-
-local function winstreakLine(data)
-    local core = data and data.modes and data.modes.core
-    if not core or #core == 0 then return nil end
-
-    local badges = {}
-    local hoverLines = { "§fTop Winstreaks", SEPARATOR }
-    for i = 1, math.min(3, #core) do
-        local streak = core[i]
-        local badge = "§8" .. i .. ". §" .. BW_COLORS.winstreak(streak.value) .. streak.value .. (streak.approximate and "+" or "")
-        table.insert(badges, badge)
-        table.insert(hoverLines, badge .. " §8— §7" .. (streak.readable or ""))
-    end
-    table.insert(hoverLines, "§8+ approximate")
-
-    return {
-        text = "§7Top Winstreaks: " .. table.concat(badges, " §8| "),
-        hover = table.concat(hoverLines, "\n")
-    }
-end
-
-local function appendStats(extra, stats)
-    local bedwars = bedwarsSummary(stats.session, stats.period)
-    local streaks = winstreakLine(stats.winstreaks)
-
-    if bedwars then
-        for _, line in ipairs(bedwars) do
-            table.insert(extra, component("\n" .. line))
-        end
-    end
-    if streaks then
-        table.insert(extra, component("\n" .. streaks.text, streaks.hover))
-    end
-    if not bedwars and not streaks then
-        table.insert(extra, component("\n§8No tracked stats yet"))
-    end
 end
 
 -- Manage panel
@@ -671,53 +756,44 @@ local function appendAnticheatFlags(extra, username)
     if #parts == 0 then return end
 
     table.insert(extra, component("\n§7Anticheat: " .. table.concat(parts, "§8, ")))
-    table.insert(extra, component("\n" .. SEPARATOR))
 end
 
-local function sendPanel(username, uuid, tags, displayName, stats)
-    local extra = {
-        component(headerName(username, displayName), "§8" .. dashUuid(uuid) .. "\n§8Click to copy name", "suggest_command", username),
-        component(" §8(§7" .. #tags .. " tag" .. (#tags == 1 and "" or "s") .. "§8)"),
-        component("\n" .. SEPARATOR),
-    }
-
+local function appendTagDetails(extra, username, tags)
     if #tags == 0 then
         table.insert(extra, component("\n§8None"))
-    else
-        for i, tag in ipairs(tags) do
-            if i > 1 then table.insert(extra, component("\n")) end
-            appendTagDetail(extra, username, tag)
-        end
+        return
     end
+    for i, tag in ipairs(tags) do
+        if i > 1 then table.insert(extra, component("\n")) end
+        appendTagDetail(extra, username, tag)
+    end
+end
 
-    table.insert(extra, component("\n" .. SEPARATOR))
-    if stats then
-        appendStats(extra, stats)
-        table.insert(extra, component("\n" .. SEPARATOR))
-    end
-    appendAnticheatFlags(extra, username)
-    table.insert(extra, component("\n§7Add:"))
+local function appendAddButtons(extra, username)
+    table.insert(extra, component("\n\n§7Add Tag:"))
     for _, tagName in ipairs(ADDABLE) do
         appendAddButton(extra, username, tagName)
     end
-
-    sendComponents(extra)
 end
 
-local function fetchStats(uuid, callback)
-    local period = starfish.config.get("stats.period", "monthly")
-    local session, winstreaks
-    local remaining = 2
-
-    local function finish()
-        remaining = remaining - 1
-        if remaining == 0 then
-            callback({ session = session, winstreaks = winstreaks, period = period })
-        end
+local function sendPanel(username, uuid, tags, displayName, overview)
+    local header = playerHeaderSpec(username, uuid, displayName, overview and overview.starText)
+    local extra = { component("\n" .. SEPARATOR .. "\n"), specComponent(header) }
+    local hover = buildHover(tags)
+    for i, tag in ipairs(tags) do
+        table.insert(extra, tagBadge(tag, i, hover, username))
     end
+    if overview then
+        table.insert(extra, component("\n" .. overview.line))
+    end
+    table.insert(extra, component("\n" .. SEPARATOR))
 
-    fetchSession(uuid, period, function(result) session = result; finish() end)
-    fetchWinstreaks(uuid, function(result) winstreaks = result; finish() end)
+    appendTagDetails(extra, username, tags)
+    appendAnticheatFlags(extra, username)
+    appendAddButtons(extra, username)
+    table.insert(extra, component("\n" .. SEPARATOR))
+
+    sendComponents(extra)
 end
 
 local function openPanel(username, withStats)
@@ -733,8 +809,9 @@ local function openPanel(username, withStats)
 
         local name = properName(username)
         if withStats then
-            fetchStats(lookup.uuid, function(stats)
-                sendPanel(name, lookup.uuid, lookup.tags, lookup.displayname, stats)
+            requestHypixelPlayer(username, function(data)
+                local overview = data and bedwarsOverview(data) or { line = "§8Stats unavailable" }
+                sendPanel(name, lookup.uuid, lookup.tags, lookup.displayname, overview)
             end)
         else
             sendPanel(name, lookup.uuid, lookup.tags, lookup.displayname, nil)
@@ -742,104 +819,106 @@ local function openPanel(username, withStats)
     end)
 end
 
-local function openRemovePanel(username)
-    lookupPlayer(username, function(lookup, err)
-        if err then
-            sendError(err)
+local function fetchCheck(player)
+    lookupPlayer(player, function(lookup, err)
+        local header = playerHeaderSpec(properName(player), lookup and lookup.uuid, lookup and lookup.displayname)
+        if err or not lookup then
+            starfish.events.emit("urchin:checkFetched", { player = player, header = header, error = err or "Player not found" })
             return
         end
-        if not lookup then
-            sendError("Player not found: " .. username)
-            return
-        end
-        if #lookup.tags == 0 then
-            sendInfo(username .. " has no tags to remove.")
-            return
-        end
-
-        local clean = properName(username)
-        local extra = { component("§7Remove from " .. headerName(clean, lookup.displayname) .. "§7:") }
-        for _, tag in ipairs(lookup.tags) do
-            appendTagDetail(extra, clean, tag)
-        end
-        sendComponents(extra)
+        fetchSessionStats(lookup.uuid, function(session, winstreaks)
+            starfish.events.emit("urchin:checkFetched", {
+                player = player,
+                header = header,
+                badges = tagBadgeSpecs(lookup.tags, player),
+                session = session,
+                winstreaks = winstreaks
+            })
+        end)
     end)
+end
+
+local function fetchSummary(player)
+    local lookup, hypixelPlayer
+    local remaining = 2
+
+    local function finish()
+        remaining = remaining - 1
+        if remaining > 0 then return end
+
+        local overview = hypixelPlayer and bedwarsOverview(hypixelPlayer)
+        starfish.events.emit("urchin:summaryFetched", {
+            player = player,
+            header = playerHeaderSpec(properName(player), lookup and lookup.uuid, lookup and lookup.displayname, overview and overview.starText),
+            badges = lookup and tagBadgeSpecs(lookup.tags, player) or {},
+            line = overview and overview.line or "§8Stats unavailable"
+        })
+    end
+
+    lookupPlayer(player, function(result) lookup = result; finish() end)
+    requestHypixelPlayer(player, function(result) hypixelPlayer = result; finish() end)
 end
 
 -- Confirmation prompts
 
-local function sendConfirm(username, header, confirmHover)
-    local function confirmButton()
-        return component("§8[§a██§8]§r", confirmHover, "run_command", "/urchin confirm " .. username)
-    end
-
+local function sendConfirm(username, header, question, hover, yesColor)
     local extra = {}
     for _, part in ipairs(header) do
         table.insert(extra, part)
     end
-    table.insert(extra, component("\n§7Proceed?"))
+    table.insert(extra, component("\n§7" .. question))
     table.insert(extra, component("\n"))
-    table.insert(extra, confirmButton())
-    table.insert(extra, component("\n"))
-    table.insert(extra, confirmButton())
+    table.insert(extra, component("§8[" .. yesColor .. "Yes§8]§r", hover, "run_command", "/urchin confirm " .. username))
 
     sendComponents(extra)
 end
 
-local function sendAddPrompt(username, display, tagType, reason)
-    local def = TAGS[tagType]
-    local header = {
-        component("§aAdd Tag"),
-        component("\n§7IGN - " .. display),
-        component("\n" .. SEPARATOR),
-    }
-    for _, part in ipairs(detailComponents({ tag_type = tagType, reason = reason })) do
+local function promptHeader(title, display, body, label)
+    local header = { component(title), component("\n" .. SEPARATOR) }
+    if label then
+        table.insert(header, component("\n§8" .. label))
+    end
+    table.insert(header, component("\n§7IGN - " .. display))
+    for _, part in ipairs(body) do
         table.insert(header, part)
     end
     table.insert(header, component("\n" .. SEPARATOR))
-    sendConfirm(username, header, "§aAdd the §" .. def.color .. def.display .. "§a tag")
+    return header
+end
+
+local function sendAddPrompt(username, display, tagType, reason)
+    local def = TAGS[tagType]
+    local header = promptHeader("§aAdd Tag", display, detailComponents({ tag_type = tagType, reason = reason }))
+    sendConfirm(username, header, "Proceed?", "§aAdd the §" .. def.color .. def.display .. "§a tag", "§a")
 end
 
 local function sendOverwritePrompt(username, display, conflict, newType, reason)
-    local newDef = TAGS[newType]
-    local header = {
-        component("§6Tag Overwrite"),
-        component("\n§7This player already has an incompatible tag. Overwriting replaces it with your tag."),
-        component("\n" .. SEPARATOR),
-        component("\n§8Current"),
-        component("\n§7IGN - " .. display),
-    }
-    for _, part in ipairs(detailComponents(conflict)) do
-        table.insert(header, part)
-    end
-    table.insert(header, component("\n" .. SEPARATOR))
-    table.insert(header, component("\n§8New"))
-    for _, part in ipairs(detailComponents({ tag_type = newType, reason = reason })) do
-        table.insert(header, part)
-    end
-    table.insert(header, component("\n" .. SEPARATOR))
-    sendConfirm(username, header, "§aOverwrite with §" .. newDef.color .. newDef.display)
+    local header = promptHeader("§6Overwrite Tag", display, detailComponents(conflict), "Current")
+    local newTagLines = tagDetailLines({ tag_type = newType, reason = reason })
+    sendConfirm(
+        username,
+        header,
+        "This player already has an incompatible tag. Proceed and overwrite with yours?",
+        "§7Overwrite with:\n" .. table.concat(newTagLines, "\n"),
+        "§c"
+    )
 end
 
 local function sendRemovePrompt(username, display, tag)
     local def = tagDef(tag.tag_type)
-    local header = {
-        component("§cRemove Tag"),
-        component("\n§7IGN - " .. display),
-        component("\n" .. SEPARATOR),
-    }
-    for _, part in ipairs(detailComponents(tag)) do
-        table.insert(header, part)
-    end
-    table.insert(header, component("\n" .. SEPARATOR))
-    sendConfirm(username, header, "§aRemove the §" .. def.color .. def.display .. "§a tag")
+    local header = promptHeader("§cRemove Tag", display, detailComponents(tag))
+    sendConfirm(username, header, "Remove?", "§cRemove the §" .. def.color .. def.display .. "§c tag", "§c")
 end
 
-local function sendResult(message, tagType)
+
+local function sendResult(message, tagType, undoUsername)
     local extra = { component(message) }
     if tagType then
         local def = tagDef(tagType)
         table.insert(extra, component(" §8[§" .. def.color .. def.icon .. "§8] §f" .. def.display .. "§a."))
+    end
+    if undoUsername then
+        table.insert(extra, component(" §8[§cUndo§8]§r", "§7Remove this tag", "run_command", "/urchin confirm " .. undoUsername))
     end
     sendComponents(extra)
 end
@@ -857,6 +936,17 @@ local function sendAddableHelp()
 end
 
 -- Tag actions
+
+local function applyTag(username, uuid, tagType, reason, display)
+    apiRequest("POST", "/v3/tags?player=" .. starfish.http.encodeUri(uuid), { type = tagType, reason = reason }, function(result)
+        if result.status ~= 201 then
+            sendError(describeTagError(result))
+            return
+        end
+        pending[username:lower()] = { kind = "remove", uuid = uuid, type = tagType, display = display }
+        sendResult("§aTagged " .. display .. "§a as", tagType, username)
+    end)
+end
 
 local function actionTag(username, typeArg, reason)
     if not typeArg or typeArg == "" then
@@ -914,11 +1004,6 @@ local function actionTag(username, typeArg, reason)
 end
 
 local function actionUntag(username, typeArg)
-    if not typeArg or typeArg == "" then
-        openRemovePanel(username)
-        return
-    end
-
     local tagType = resolveType(typeArg)
     if not TAGS[tagType] then
         sendError("Unknown tag type \"" .. typeArg .. "\".")
@@ -967,13 +1052,7 @@ local function actionConfirm(username)
     local who = action.display or ("§f" .. username)
 
     if action.kind == "add" then
-        apiRequest("POST", "/v3/tags?player=" .. starfish.http.encodeUri(action.uuid), { type = action.type, reason = action.reason }, function(result)
-            if result.status == 201 then
-                sendResult("§aTagged " .. who .. "§a as", action.type)
-            else
-                sendError(describeTagError(result))
-            end
-        end)
+        applyTag(username, action.uuid, action.type, action.reason, who)
     elseif action.kind == "overwrite" then
         apiRequest("PATCH", "/v3/tags?player=" .. starfish.http.encodeUri(action.uuid), { type = action.oldType, new_type = action.newType, new_reason = action.reason }, function(result)
             if result.status == 200 then
@@ -1000,6 +1079,7 @@ local function resetSession()
     taggedDisplayNames = {}
     playerTags = {}
     pending = {}
+    playerStatsWaiters = {}
 end
 
 starfish.events.on("chat:receive", onChat)
@@ -1040,10 +1120,10 @@ starfish.commands.register("tag", {
 end)
 
 starfish.commands.register("untag", {
-    description = "Remove a tag from a player (omit the type to choose)",
+    description = "Remove a tag from a player",
     arguments = {
         { name = "player", type = "string", description = "Player to untag" },
-        { name = "tagtype", type = "string", optional = true, description = "Tag type to remove - omit to choose" }
+        { name = "tagtype", type = "string", description = "Tag type to remove (e.g. bc, cc, s, c)" }
     }
 }, function(ctx)
     actionUntag(resolveTarget(ctx.args.player), ctx.args.tagtype)
@@ -1074,6 +1154,9 @@ starfish.plugin.export("getTagColor", function(tagType)
 end)
 
 starfish.plugin.export("fetchPlayer", fetchHypixelPlayer)
+starfish.plugin.export("fetchCheck", fetchCheck)
+starfish.plugin.export("fetchSummary", fetchSummary)
+starfish.plugin.export("bedwarsLevel", bedwarsLevel)
 
 function plugin.onDisable()
     resetSession()
