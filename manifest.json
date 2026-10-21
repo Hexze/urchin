@@ -1,0 +1,25 @@
+{
+  "name": "urchin",
+  "display_name": "Urchin",
+  "version": "1.0.0",
+  "description": "Urchin blacklist integration & API utilities",
+  "homepage": null,
+  "dependencies": [
+    {
+      "name": "hypixel-mod-api",
+      "version": null,
+      "optional": false
+    },
+    {
+      "name": "anticheat",
+      "version": null,
+      "optional": true
+    },
+    {
+      "name": "denicker",
+      "version": null,
+      "optional": false
+    }
+  ],
+  "min_starfish_version": null
+}
