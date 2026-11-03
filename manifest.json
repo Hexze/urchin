@@ -1,8 +1,9 @@
 {
   "name": "urchin",
   "display_name": "Urchin",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Urchin blacklist integration & API utilities",
+  "prefix": "§5BL",
   "homepage": null,
   "dependencies": [
     {
@@ -21,5 +22,23 @@
       "optional": false
     }
   ],
-  "min_starfish_version": null
+  "commands": [
+    {
+      "usage": "/check <usernames>",
+      "description": "Check and manage blacklist tags for one or more players"
+    },
+    {
+      "usage": "/confirm <player>",
+      "description": "Confirm a pending tag action"
+    },
+    {
+      "usage": "/tag <player> [tagtype] [reason]",
+      "description": "Tag a player (omit the type to open the panel)"
+    },
+    {
+      "usage": "/untag <player> <tagtype>",
+      "description": "Remove a tag from a player"
+    }
+  ],
+  "min_starfish_version": "0.1.0-beta.17"
 }
