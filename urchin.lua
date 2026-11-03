@@ -2,7 +2,8 @@ plugin = {
     name = "urchin",
     displayName = "Urchin",
     prefix = "§5BL",
-    version = "1.0.0",
+    version = "1.0.1",
+    minStarfishVersion = "0.1.0-beta.17",
     description = "Urchin blacklist integration & API utilities",
     dependencies = {
         { name = "hypixel-mod-api" },
@@ -133,6 +134,15 @@ starfish.schema.section({
     description = "Mark tagged players in the tab list.",
     settings = {
         { key = "modifyDisplayNames.enabled", type = "toggle", default = true, label = "Enabled", description = "Turn tag labels on or off." },
+    }
+})
+
+starfish.schema.section({
+    key = "nametags",
+    label = "Label Tags in Nametags",
+    description = "Mark tagged players' nametags. Skips players on your own team due to Minecraft limitations.",
+    settings = {
+        { key = "nametags.enabled", type = "toggle", default = true, label = "Enabled", description = "Turn nametag labels on or off." },
     }
 })
 
@@ -598,10 +608,18 @@ local function suffixFor(tag)
     return " §8[§" .. def.color .. def.icon .. "§8]§r"
 end
 
+local function nametagFor(tag)
+    local def = tagDef(tag.tag_type)
+    return " §8[§" .. def.color .. def.icon .. "§8]"
+end
+
 local function applyTagSuffix(uuid, tag)
     taggedDisplayNames[uuid] = tag
     if starfish.config.get("modifyDisplayNames.enabled") then
         starfish.display.setSuffix(uuid, suffixFor(tag))
+    end
+    if starfish.config.get("nametags.enabled") then
+        starfish.display.setNametagSuffix(uuid, nametagFor(tag))
     end
 end
 
@@ -614,6 +632,18 @@ end
 local function clearDisplayNames()
     for uuid in pairs(taggedDisplayNames) do
         starfish.display.clearSuffix(uuid)
+    end
+end
+
+local function restoreNametags()
+    for uuid, tag in pairs(taggedDisplayNames) do
+        starfish.display.setNametagSuffix(uuid, nametagFor(tag))
+    end
+end
+
+local function clearNametags()
+    for uuid in pairs(taggedDisplayNames) do
+        starfish.display.clearNametagSuffix(uuid)
     end
 end
 
@@ -793,7 +823,9 @@ end
 -- Tab list lookups
 
 local function wantsLookups()
-    return starfish.config.get("alerts.enabled") or starfish.config.get("modifyDisplayNames.enabled")
+    return starfish.config.get("alerts.enabled")
+        or starfish.config.get("modifyDisplayNames.enabled")
+        or starfish.config.get("nametags.enabled")
 end
 
 local function decodeSkinProfile(encoded)
@@ -1375,6 +1407,7 @@ end
 
 local function resetSession()
     clearDisplayNames()
+    clearNametags()
     taggedDisplayNames = {}
     playerTags = {}
     pending = {}
@@ -1421,7 +1454,14 @@ starfish.events.on("config:changed", function(event)
             restoreDisplayNames()
         end
     end
-    if event.key == "alerts.enabled" or event.key == "alerts.ignoreParty" or event.key == "modifyDisplayNames.enabled" then
+    if event.key == "nametags.enabled" then
+        if event.value == false then
+            clearNametags()
+        else
+            restoreNametags()
+        end
+    end
+    if event.key == "alerts.enabled" or event.key == "alerts.ignoreParty" or event.key == "modifyDisplayNames.enabled" or event.key == "nametags.enabled" then
         lookUpListed()
     end
 end)
