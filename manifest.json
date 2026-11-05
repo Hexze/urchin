@@ -1,7 +1,7 @@
 {
   "name": "urchin",
   "display_name": "Urchin",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Urchin blacklist integration & API utilities",
   "prefix": "§5BL",
   "homepage": null,
@@ -25,7 +25,7 @@
   "commands": [
     {
       "usage": "/check <usernames>",
-      "description": "Check and manage blacklist tags for one or more players"
+      "description": "Check and manage blacklist tags for one or more players (also /urchin <usernames>)"
     },
     {
       "usage": "/confirm <player>",
@@ -40,5 +40,5 @@
       "description": "Remove a tag from a player"
     }
   ],
-  "min_starfish_version": "0.1.0-beta.17"
+  "min_starfish_version": "0.1.0-beta.19"
 }
