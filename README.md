@@ -10,7 +10,7 @@ Urchin blacklist integration & API utilities
 
 ## Commands
 
-- `/check <usernames>`: Check and manage blacklist tags for one or more players
+- `/check <usernames>`: Check and manage blacklist tags for one or more players (also /urchin <usernames>)
 - `/confirm <player>`: Confirm a pending tag action
 - `/tag <player> [tagtype] [reason]`: Tag a player (omit the type to open the panel)
 - `/untag <player> <tagtype>`: Remove a tag from a player
