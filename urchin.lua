@@ -2,8 +2,8 @@ plugin = {
     name = "urchin",
     displayName = "Urchin",
     prefix = "§5BL",
-    version = "1.0.1",
-    minStarfishVersion = "0.1.0-beta.17",
+    version = "1.0.2",
+    minStarfishVersion = "0.1.0-beta.19",
     description = "Urchin blacklist integration & API utilities",
     dependencies = {
         { name = "hypixel-mod-api" },
@@ -28,6 +28,19 @@ local PARTY_REPLY_TIMEOUT_MS = 3000
 local PLACEHOLDER_UUID_VERSION = "2"
 local REPLAY_SERVER_TYPE = "REPLAY"
 local REFUSED_STATUSES = { [401] = true, [403] = true }
+local PLUGIN_CHANNEL = "urchin:plugin"
+local MOD_CHANNEL = "urchin:mod"
+local REFRESHED_ON_CHANGE = {
+    ["alerts.enabled"] = true,
+    ["alerts.ignoreParty"] = true,
+    ["modifyDisplayNames.enabled"] = true,
+    ["nametags.enabled"] = true,
+}
+local MOD_FEATURES = {
+    alerts = "alerts.enabled",
+    tab = "modifyDisplayNames.enabled",
+    nametags = "nametags.enabled",
+}
 local NOT_FOUND_STATUS = 404
 
 local TAGS = {
@@ -160,6 +173,12 @@ starfish.schema.section({
 local taggedDisplayNames = {}
 local playerTags = {}
 local pending = {}
+local modCovered = {}
+local announcedToMod = false
+
+local function featureEnabled(key)
+    return starfish.config.get(key) and not modCovered[key]
+end
 
 -- Formatting
 
@@ -615,10 +634,10 @@ end
 
 local function applyTagSuffix(uuid, tag)
     taggedDisplayNames[uuid] = tag
-    if starfish.config.get("modifyDisplayNames.enabled") then
+    if featureEnabled("modifyDisplayNames.enabled") then
         starfish.display.setSuffix(uuid, suffixFor(tag))
     end
-    if starfish.config.get("nametags.enabled") then
+    if featureEnabled("nametags.enabled") then
         starfish.display.setNametagSuffix(uuid, nametagFor(tag))
     end
 end
@@ -645,6 +664,12 @@ local function clearNametags()
     for uuid in pairs(taggedDisplayNames) do
         starfish.display.clearNametagSuffix(uuid)
     end
+end
+
+local function clearLabels()
+    clearDisplayNames()
+    clearNametags()
+    taggedDisplayNames = {}
 end
 
 -- Game visit
@@ -687,7 +712,7 @@ end
 -- Party
 
 local function wantsParty()
-    return not visit.inReplay and starfish.config.get("alerts.enabled") and starfish.config.get("alerts.ignoreParty")
+    return not visit.inReplay and featureEnabled("alerts.enabled") and starfish.config.get("alerts.ignoreParty")
 end
 
 local function memberSet(members)
@@ -823,9 +848,9 @@ end
 -- Tab list lookups
 
 local function wantsLookups()
-    return starfish.config.get("alerts.enabled")
-        or starfish.config.get("modifyDisplayNames.enabled")
-        or starfish.config.get("nametags.enabled")
+    return featureEnabled("alerts.enabled")
+        or featureEnabled("modifyDisplayNames.enabled")
+        or featureEnabled("nametags.enabled")
 end
 
 local function decodeSkinProfile(encoded)
@@ -967,7 +992,7 @@ local function showTags(entries)
             end
         end
     end
-    if starfish.config.get("alerts.enabled") then
+    if featureEnabled("alerts.enabled") then
         alertAfterDelay(entries)
     end
 end
@@ -1406,9 +1431,7 @@ end
 -- Session reset
 
 local function resetSession()
-    clearDisplayNames()
-    clearNametags()
-    taggedDisplayNames = {}
+    clearLabels()
     playerTags = {}
     pending = {}
     forgetLookups()
@@ -1424,10 +1447,63 @@ local function leaveServer()
     visit.onGameServer = false
 end
 
+local function refreshFeature(key)
+    if key == "modifyDisplayNames.enabled" then
+        if featureEnabled(key) then restoreDisplayNames() else clearDisplayNames() end
+    elseif key == "nametags.enabled" then
+        if featureEnabled(key) then restoreNametags() else clearNametags() end
+    end
+    lookUpListed()
+end
+
+local function announceToMod(listening)
+    announcedToMod = listening
+    starfish.client.sendPluginMessage(PLUGIN_CHANNEL, { listening and 1 or 0 })
+end
+
+local function featuresIn(payload)
+    local ok, features = pcall(json.decode, string.char(table.unpack(payload)))
+    local covered = {}
+    for _, feature in ipairs(ok and type(features) == "table" and features or {}) do
+        local key = MOD_FEATURES[feature]
+        if key then covered[key] = true end
+    end
+    return covered
+end
+
+local function followMod(payload)
+    local previous = modCovered
+    modCovered = featuresIn(payload)
+    for _, key in pairs(MOD_FEATURES) do
+        if previous[key] ~= modCovered[key] then refreshFeature(key) end
+    end
+end
+
+local function leaveMod()
+    if announcedToMod then announceToMod(false) end
+end
+
+local function forgetMod()
+    announcedToMod = false
+    modCovered = {}
+end
+
 -- Event wiring
 
 starfish.events.on("world:respawn", resetSession)
-starfish.events.on("session:join", leaveServer)
+starfish.events.on("session:join", function()
+    leaveServer()
+    announceToMod(true)
+end)
+
+starfish.events.on("session:detached", forgetMod)
+
+starfish.client.blockChannel(MOD_CHANNEL)
+starfish.client.onPluginMessage(MOD_CHANNEL, followMod)
+
+function plugin.onDisable()
+    leaveMod()
+end
 
 starfish.events.on("hypixel:location", function(event)
     if event.success then enterServer(event.location) end
@@ -1447,29 +1523,14 @@ end)
 starfish.events.on("hypixel:party_info", updateParty)
 
 starfish.events.on("config:changed", function(event)
-    if event.key == "modifyDisplayNames.enabled" then
-        if event.value == false then
-            clearDisplayNames()
-        else
-            restoreDisplayNames()
-        end
-    end
-    if event.key == "nametags.enabled" then
-        if event.value == false then
-            clearNametags()
-        else
-            restoreNametags()
-        end
-    end
-    if event.key == "alerts.enabled" or event.key == "alerts.ignoreParty" or event.key == "modifyDisplayNames.enabled" or event.key == "nametags.enabled" then
-        lookUpListed()
-    end
+    if REFRESHED_ON_CHANGE[event.key] then refreshFeature(event.key) end
 end)
 
 -- Commands
 
 starfish.commands.register("check", {
-    description = "Check and manage blacklist tags for one or more players",
+    default = true,
+    description = "Check and manage blacklist tags for one or more players (also /urchin <usernames>)",
     arguments = {
         { name = "usernames", type = "greedy", description = "Space-separated usernames" }
     }
@@ -1533,5 +1594,6 @@ starfish.plugin.export("bedwarsLevel", bedwarsLevel)
 
 local restored = starfish.plugins.require("hypixel-mod-api").getLocation()
 if restored and restored.serverName then
+    announceToMod(true)
     enterServer(restored)
 end
